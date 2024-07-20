@@ -579,8 +579,8 @@ class UOpGraph:
     def push(u:UOp):
       priority = 0
       # prefer uops that are loop children
-      for l, ss in scope_children.items():
-        if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
+#      for l, ss in scope_children.items():
+#        if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
       heapq.heappush(queue, (priority, u))
 
     for u in children:
