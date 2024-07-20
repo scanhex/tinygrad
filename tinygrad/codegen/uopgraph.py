@@ -67,14 +67,19 @@ class PatternMatcher:
     for p,fxn in self.patterns:
       if isinstance(p, UOp): p = UPat.compile(p)
       assert p.op is not None
-      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn))
+      for uop in p.op: 
+          self.pdict[(uop, p.arg)].append((p, fxn))
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp) -> Optional[UOp]:
-    for p,fxn in itertools.chain(self.pdict[(uop.op, uop.arg)], self.pdict[(uop.op, None)]):
-      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
+    ds = []
+    ds.append(self.pdict[(uop.op, uop.arg)])
+    ds.append(self.pdict[(uop.op, None)])
+    for p,fxn in itertools.chain(*ds):
+      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: 
+        return ret # NOTE: if it returns None, we keep trying to match
     return None
 
 # ***** image handling *****
@@ -471,14 +476,6 @@ expander = PatternMatcher([
 
 # *** uop graph ***
 
-def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], in_degree:Dict[UOp, int]):
-  if u in children: return
-  children[u] = []
-  for x in u.src:
-    get_children_dfs(x, children, in_degree)
-    children[x].append(u)
-  in_degree[u] = len(u.src)
-
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
   nodes: Dict[Tuple, UOp] = {}
   replace: Dict[UOp, UOp] = {}
@@ -560,7 +557,15 @@ class UOpGraph:
     # BFS toposort
     children: Dict[UOp, List[UOp]] = {}
     in_degree: Dict[UOp, int] = {}
-    get_children_dfs(sink, children, in_degree)
+    def get_children_dfs(u:UOp):
+      if u in children: return
+      children[u] = []
+      for x in u.src:
+        get_children_dfs(x)
+        children[x].append(u)
+      in_degree[u] = len(u.src)
+
+    get_children_dfs(sink)
 
     @functools.lru_cache(None)
     def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
@@ -574,8 +579,8 @@ class UOpGraph:
     def push(u:UOp):
       priority = 0
       # prefer uops that are loop children
-      for l, ss in scope_children.items():
-        if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
+#      for l, ss in scope_children.items():
+#        if l.op is UOps.RANGE and u in ss: priority -= l.arg[0]*1000 + l.arg[1]
       heapq.heappush(queue, (priority, u))
 
     for u in children:
