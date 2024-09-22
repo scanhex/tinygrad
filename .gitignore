@@ -56,3 +56,7 @@ comgr_*
 *.pkl
 site/
 master_schedule.py
+# pixi environments
+.pixi
+*.egg-info
+

@@ -1,0 +1,30 @@
+[project]
+name = "tinygrad"
+version = "0.1.0"
+description = "Add a short description here"
+authors = ["Alex Morozov <scanhex@gmail.com>"]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tasks]
+
+[dependencies]
+
+[target.linux-64.dependencies]
+pytorch = "*"
+pillow = "*"
+pytest = "*"
+pytest-xdist = "*"
+onnx = "==1.16.0"
+onnx2torch = "*"
+opencv = "*"
+tabulate = "*"
+safetensors = "*"
+transformers = "*"
+sentencepiece = "*"
+tiktoken = "*"
+librosa = "*"
+networkx = "*"
+hypothesis = "*"
+nibabel = "*"
+pydot = "*"
