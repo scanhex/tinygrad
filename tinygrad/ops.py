@@ -497,7 +497,7 @@ class UPat(MathTrait):
       self.early_reject = set((pp.op[0], pp.arg) for pp in upat_match if pp.op is not None and len(pp.op) == 1)
 
   @staticmethod
-  def any(*src): return UPatAny(src=src)
+  def any(*src): return UPat(src=src)
 
   @staticmethod
   @functools.lru_cache(None)
@@ -545,10 +545,11 @@ class UPat(MathTrait):
     if self.src is None: return [store]
     res: List[Dict[str, UOp]] = []
     for vp in self.src:
-      stores, new_stores = [store.copy()], []
+      stores = [store.copy()]
       for uu, vv in zip(uop.src, vp):
+        new_stores = []
         for s in stores: new_stores.extend(vv.match(uu, s))
-        stores, new_stores = new_stores, []
+        stores = new_stores
       res.extend(stores)
     return res
 
