@@ -475,7 +475,17 @@ class UPat(MathTrait):
   def __init__(self, op:Optional[Union[UOps, Tuple[UOps, ...]]]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None,
                src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, arg:Any=None,
                name:Optional[str]=None, allow_any_len:bool=False, location=None,
-               custom_early_reject:Optional[Set[Tuple[UOps, Any]]]=None):
+               custom_early_reject:Optional[Set[Tuple[UOps, Any]]]=None, any_=False):
+    self.any_ = any_
+    if any_:
+        self.op, self.dtype, self.arg, self.src, self.name = None, None, None, None, None
+        self.allowed_len = 1
+        assert isinstance(src, tuple)
+#        self.src = [src]
+        self.src = [[x] for x in src]
+        print(self.src)
+#        print(len(self.src))
+        return
     self.op: Optional[Tuple[UOps, ...]] = (op,) if isinstance(op, UOps) else op
     self.dtype: Optional[Tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
     self.arg, self.name = arg, name
@@ -497,7 +507,7 @@ class UPat(MathTrait):
       self.early_reject = set((pp.op[0], pp.arg) for pp in upat_match if pp.op is not None and len(pp.op) == 1)
 
   @staticmethod
-  def any(*src): return UPatAny(src=src)
+  def any(*src): return UPat(src=src, any_=True)
 
   @staticmethod
   @functools.lru_cache(None)
@@ -545,10 +555,15 @@ class UPat(MathTrait):
     if self.src is None: return [store]
     res: List[Dict[str, UOp]] = []
     for vp in self.src:
-      stores, new_stores = [store.copy()], []
+      stores = [store.copy()]
       for uu, vv in zip(uop.src, vp):
+        new_stores = []
         for s in stores: new_stores.extend(vv.match(uu, s))
-        stores, new_stores = new_stores, []
+        stores = new_stores
+      if stores:
+          if self.any_:
+              print(uop, stores)
+          return stores
       res.extend(stores)
     return res
 
@@ -676,6 +691,8 @@ class RewriteContext:
     new_src = tuple(map(self.rewrite, n.src))
     new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
     self.replace[n] = ret = n if new_n is None else self.rewrite(new_n)
+    if not ret == n:
+        print('rewrote ', n, ' to ', ret)
     return ret
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
