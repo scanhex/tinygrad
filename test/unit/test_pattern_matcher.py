@@ -1,9 +1,48 @@
+from typing import Any, Set, List
 import unittest, itertools
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOps, UOp, BinaryOps, TernaryOps, ReduceOps, UnaryOps # noqa: F401
 from tinygrad.ops import PatternMatcher, UPat
 
+import dfa
+
+class State:
+    u: UPat
+    stage_in_uop: str # op, arg, dtype
+
+def create_dfa(upat: UPat) -> dfa.DFA:
+    root = 0
+    term = 1
+    class OtherTransition:
+        pass
+    alphabet: Set[Any] = {OtherTransition()}
+    def gather_alphabet(u: UPat):
+        if u.op: alphabet.add(u.op)
+        if u.arg: alphabet.add(u.arg)
+        if u.dtype: alphabet.add(u.dtype)
+        if u.src:
+            for comb in u.src:
+                for v in ((next(comb),) if isinstance(comb, itertools.repeat) else comb):
+                    gather_alphabet(v)
+    gather_alphabet(upat)
+    print(alphabet)
+    return dfa.DFA(
+            start=root,
+            inputs = alphabet,
+            label=lambda x: 1 if x == term else None,
+            transition=lambda s, c: go(s, c),
+            outputs={None, 1}
+            )
+
+def get_dfa_word(_: UOp) -> List:
+    return []
+
 class TestPatternMatcher(unittest.TestCase):
+  def test_dfa(self):
+      upat = UPat(UOps.CONST, name="x", dtype=dtypes.float)
+      dfa = create_dfa(upat)
+      assert dfa.label(get_dfa_word(UOp(UOps.CONST, dtypes.float, arg=1.0))) == 1
+
   def test_simple_match(self):
     matcher = PatternMatcher([(UPat(UOps.CONST, name="x", dtype=dtypes.float), lambda x: x)])
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
