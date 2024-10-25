@@ -10,10 +10,11 @@ from tinygrad.ops import PatternMatcher, UPat
 import dfa
 
 OTHER_TRANSITION = "OTHER"
+SRC_END = "SRC_END"
 def create_dfa(upat: UPat) -> dfa.DFA:
   accept = 0
   reject = 1
-  alphabet: Set[Any] = {OTHER_TRANSITION}
+  alphabet: Set[Any] = {OTHER_TRANSITION, SRC_END}
   def gather_alphabet(u: UPat):
     if u.op: alphabet.update(u.op)
     if u.arg: alphabet.add(u.arg)
@@ -27,7 +28,7 @@ def create_dfa(upat: UPat) -> dfa.DFA:
   for x in alphabet: e[(reject, x)] = e[(accept, x)] = reject
   cnt = 2
   def alloc() -> int: nonlocal cnt; c = cnt; cnt += 1; return c
-  def gen(u: UPat, cb: Callable[[int], None]) -> Tuple[int, Callable[[int], None]]:
+  def gen(u: UPat, cb: Callable[[int], None], repeat=False) -> Tuple[int, Callable[[int], None]]:
     start, after_op, after_dtype = alloc(), alloc(), alloc()
     cb(start)
     accepted = set(u.op) if u.op else alphabet # can switch alphabet-> all_ops, same below
@@ -39,14 +40,23 @@ def create_dfa(upat: UPat) -> dfa.DFA:
       for a in alphabet: e[(after_dtype, a)] = x if a in accepted else reject
     assert u.src # todo handle None
     assert len(u.src) == 1 # todo unfold multi-src patterns
-    assert not isinstance(u.src[0], itertools.repeat) # todo handle repeats
+    rep = isinstance(u.src[0], itertools.repeat)
     curcb = connect
     for i, v in enumerate(u.src[0]):
-      v_start, curcb = gen(v, curcb)
+      v_start, curcb = gen(v, curcb, repeat=rep)
       if i == 0: 
         accepted = {u.arg} if u.arg else alphabet
         for a in alphabet: e[(after_dtype, a)] = v_start if a in accepted else reject
-    return start, curcb
+      if rep: break
+    next = alloc()
+    curcb(next)
+    repeat_chars = set() if not repeat else set(u.op) if u.op else alphabet - ({SRC_END})
+    assert SRC_END not in repeat_chars
+    for a in repeat_chars: e[(next, a)] = after_op
+    def connect2(x: int):
+      for a in alphabet: 
+        if a not in repeat_chars: e[(next, a)] = x if a == SRC_END else reject
+    return start, connect2
 
   root, callback = gen(upat, lambda _: None)
   callback(accept)
@@ -91,16 +101,51 @@ def dfa_union(dfas: List[dfa.DFA]) -> dfa.DFA:
 def create_multi_dfa(upats: List[UPat]) -> dfa.DFA:
   return dfa_union([create_dfa(u) for u in upats])
 
+# TODO this is quadratic, traverse the DFA manually (with early return possibly)
 def get_dfa_word(dfa: dfa.DFA, u: UOp) -> List:
   assert dfa.inputs
   return [x if x in dfa.inputs else OTHER_TRANSITION for x in (u.op, u.dtype, u.arg)] +\
-      list(itertools.chain.from_iterable(map(lambda x: get_dfa_word(dfa, x), u.src)))
+      list(itertools.chain.from_iterable(map(lambda x: get_dfa_word(dfa, x), u.src))) + [SRC_END]
 
 class TestPatternMatcher(unittest.TestCase):
   def test_dfa(self):
-    upats = [UPat(UOps.CONST, name="x", dtype=dtypes.float, src=()), UPat(UOps.CONST, name="x", dtype=dtypes.float, src=())];
+    upats = [UPat(UOps.CONST, name="x", dtype=dtypes.float, src=()), UPat(UOps.CONST, name="x", dtype=dtypes.int, src=())];
+    dfa1 = create_dfa(upats[0])
+    dfa2 = create_dfa(upats[1])
+    uop1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
+    uop2 = UOp(UOps.CONST, dtypes.int, arg=1.0)
+    assert dfa1.label(get_dfa_word(dfa1, uop1))
+    assert not dfa1.label(get_dfa_word(dfa1, uop2))
+    assert not dfa2.label(get_dfa_word(dfa2, uop1))
+    assert dfa2.label(get_dfa_word(dfa2, uop2))
+
+  def test_dfa_repeat(self):
+    upats = [UPat(UOps.CONST, name="x", dtype=dtypes.float, src=UPat(UOps.ALU, src=())),
+             UPat(UOps.CONST, name="x", dtype=dtypes.int, src=())];
+    dfa1 = create_dfa(upats[0])
+    dfa2 = create_dfa(upats[1])
+    
+    uop2 = UOp(UOps.CONST, dtypes.float, arg=1.0)
+    print(dfa1)
+    word1 = get_dfa_word(dfa1, UOp(UOps.CONST, dtypes.float, arg=1.0, src=(UOp(UOps.ALU),)))
+    word2 = get_dfa_word(dfa1, UOp(UOps.CONST, dtypes.float, arg=1.0, src=(UOp(UOps.ALU), UOp(UOps.ALU))))
+    print(word1)
+    print(word2)
+    assert dfa1.label(word1)
+    assert dfa1.label(word2)
+#    assert not dfa2.label(get_dfa_word(dfa1, uop1))
+
+
+  def test_multi_dfa(self):
+    upats = [UPat(UOps.CONST, name="x", dtype=dtypes.float, src=()), UPat(UOps.CONST, name="x", dtype=dtypes.int, src=())];
     dfa = create_multi_dfa(upats)
-    assert dfa.label(get_dfa_word(dfa, UOp(UOps.CONST, dtypes.float, arg=1.0))) == (0,1)
+    assert dfa.label(get_dfa_word(dfa, UOp(UOps.CONST, dtypes.float, arg=1.0))) == (0,)
+    assert dfa.label(get_dfa_word(dfa, UOp(UOps.CONST, dtypes.int, arg=1.0))) == (1,)
+
+  def test_dfa2(self):
+    upats = [UPat(UOps.CONST, name="x", dtype=dtypes.float, src=(UPat(UOps.ALU, src=()),)), UPat(UOps.CONST, name="x", dtype=dtypes.float, src=())];
+    dfa = create_multi_dfa(upats)
+    assert dfa.label(get_dfa_word(dfa, UOp(UOps.CONST, dtypes.float, arg=1.0, src=(UOp(UOps.ALU),)))) == (0,)
     assert dfa.label(get_dfa_word(dfa, UOp(UOps.CONST, dtypes.int, arg=1.0))) == ()
 
   def test_simple_match(self):
